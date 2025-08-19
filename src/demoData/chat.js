@@ -31,7 +31,6 @@ body {
     text-shadow: 1px 1px 3px rgb(0 0 0 / 56%);
 }
 
-
 #chat-container {
     position: fixed;
     padding: 10px;
@@ -41,12 +40,58 @@ body {
     transform: translate(-50%, -50%);
     display: none;
     border-radius: 5px;
-    width: 40%;
+    width: 45%;
+    max-width: 600px;
+    min-width: 400px;
+    height: 60vh;
+    max-height: 600px;
     background: linear-gradient(135deg, rgb(215 98 150 / 92%),rgb(34 78 139 / 93%), rgb(114 222 172 / 94%));
     box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.2);
+    display: flex;
+    flex-direction: column;
 }
 
+#chat-messages {
+    flex: 1;
+    padding: 15px;
+    overflow-y: auto;
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 5px;
+    margin-bottom: 10px;
+}
 
+.chat-message {
+    margin-bottom: 12px;
+    padding: 8px 12px;
+    border-radius: 10px;
+    max-width: 80%;
+    word-wrap: break-word;
+}
+
+.chat-message.user {
+    background: #007bff;
+    color: white;
+    margin-left: auto;
+    text-align: right;
+}
+
+.chat-message.ai {
+    background: #f8f9fa;
+    color: #333;
+    border: 1px solid #e9ecef;
+}
+
+.chat-message.error {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+
+.chat-message .timestamp {
+    font-size: 0.8em;
+    opacity: 0.7;
+    margin-top: 4px;
+}
 
 #chat-header {
     display: flex;
@@ -86,7 +131,6 @@ body {
     visibility: hidden;
 }
 
-
 #circle-button {
     padding: 0;
     border: none;
@@ -99,15 +143,18 @@ body {
     text-shadow: 1px 1px 3px black;
 }
 
-#close-button {
+#close-button, #clear-chat-button {
     cursor: pointer;
-    padding: 0;
+    padding: 5px;
+    margin-left: 5px;
     border: none;
-    background-color: transparent;
-    font-size: 24px;
+    background-color: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+    font-size: 14px;
     color: #fff; 
     text-shadow: 1px 1px 3px black;
 }
+
 #send-button {
     cursor: pointer;
     padding: 0;
@@ -117,8 +164,9 @@ body {
 }
 
 #close-button:hover,
+#clear-chat-button:hover,
 #send-button:hover {
-    color: #888;
+    background-color: rgba(255, 255, 255, 0.3);
 }
 
 #chat-input-container,
@@ -183,15 +231,17 @@ body {
             <button id="chat-assistant-button">🤖AI</button>
         </div>
     
-        <div id="chat-container">
+        <div id="chat-container" style="display: none;">
             <div id="chat-header">
-                <span id="circle-button">Univer AI 助手<div id="loading-indicator"></div></span>
-    
-                <button id="close-button">×</button>
+                <span id="circle-button">Gemini AI Assistant<div id="loading-indicator"></div></span>
+                <div>
+                    <button id="clear-chat-button">Clear</button>
+                    <button id="close-button">×</button>
+                </div>
             </div>
+            <div id="chat-messages"></div>
             <div id="chat-input-container">
-                <textarea id="chat-input" placeholder="请输入问题"></textarea>
-                <!-- <textarea id="chat-input" placeholder="请输入问题"></textarea> -->
+                <textarea id="chat-input" placeholder="Ask me anything about your spreadsheet..."></textarea>
                 <button id="send-button" disabled>
                     <span><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" class="h-4 w-4 m-1 md:m-0"
                             stroke-width="2">
@@ -201,44 +251,175 @@ body {
                         </svg></span>
                 </button>
             </div>
-    
         </div>`;
     document.body.insertAdjacentHTML('beforeend', html)
 
+    // Initialize AI services
+    let aiServices = null;
+    async function initAIServices() {
+        if (!aiServices) {
+            try {
+                const { geminiAI } = await import('../services/geminiAI.js');
+                aiServices = { geminiAI };
+                console.log('AI services loaded successfully');
+            } catch (error) {
+                console.error('Failed to load AI services:', error);
+            }
+        }
+        return aiServices;
+    }
 
     const assistantButton = document.getElementById('chat-assistant-button');
     const chatContainer = document.getElementById('chat-container');
     const closeButton = document.getElementById('close-button');
+    const clearChatButton = document.getElementById('clear-chat-button');
     const chatInput = document.getElementById('chat-input');
     const sendButton = document.getElementById('send-button');
     const loadingIndicator = document.getElementById('loading-indicator');
+    const chatMessages = document.getElementById('chat-messages');
+
+    // Chat functionality
+    function addMessage(content, type = 'ai', timestamp = null) {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `chat-message ${type}`;
+        
+        const contentDiv = document.createElement('div');
+        contentDiv.textContent = content;
+        messageDiv.appendChild(contentDiv);
+        
+        if (timestamp !== false) {
+            const timestampDiv = document.createElement('div');
+            timestampDiv.className = 'timestamp';
+            timestampDiv.textContent = timestamp || new Date().toLocaleTimeString();
+            messageDiv.appendChild(timestampDiv);
+        }
+        
+        chatMessages.appendChild(messageDiv);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    function showLoading(show = true) {
+        if (show) {
+            loadingIndicator.classList.add('show-loading');
+        } else {
+            loadingIndicator.classList.remove('show-loading');
+        }
+    }
+
+    async function processMessage(message) {
+        try {
+            showLoading(true);
+            
+            // Initialize AI services if needed
+            const services = await initAIServices();
+            if (!services) {
+                throw new Error('AI services not available');
+            }
+
+            // Get current spreadsheet data for context
+            const rangeData = getCurrentSpreadsheetData();
+            
+            // Process with Gemini AI
+            const response = await services.geminiAI.processUserQuery(message, rangeData);
+            
+            showLoading(false);
+            
+            // Display AI response
+            addMessage(response.content, 'ai');
+            
+            // Handle actions (charts, formulas, etc.)
+            if (response.actions && response.actions.length > 0) {
+                for (const action of response.actions) {
+                    if (action.type === 'chart') {
+                        addMessage('📊 Creating chart...', 'ai', false);
+                        try {
+                            const { aiChartGenerator } = await import('../services/chartGenerator.js');
+                            const chartResult = await aiChartGenerator.generateChart(action.config, rangeData);
+                            addMessage(chartResult.success ? 
+                                `✅ ${chartResult.message}` : 
+                                `❌ ${chartResult.message}`, 'ai', false);
+                        } catch (error) {
+                            addMessage(`❌ Chart creation failed: ${error.message}`, 'error', false);
+                        }
+                    }
+                    
+                    if (action.type === 'formula') {
+                        addMessage(`💡 Formula suggestion: ${action.config.formula || action.config.description}`, 'ai', false);
+                    }
+                }
+            }
+            
+        } catch (error) {
+            showLoading(false);
+            console.error('Chat processing error:', error);
+            addMessage(`Sorry, I encountered an error: ${error.message}`, 'error');
+        }
+    }
+
+    function getCurrentSpreadsheetData() {
+        try {
+            const luckysheet = window.luckysheet;
+            if (luckysheet && luckysheet.getdatabyselection) {
+                return luckysheet.getdatabyselection();
+            }
+            
+            // Fallback to current sheet data
+            const Store = window.Store;
+            if (Store && Store.flowdata) {
+                const data = Store.flowdata;
+                return data.slice(0, 10).map(row => 
+                    row.slice(0, 10).map(cell => cell?.v || cell?.m || '')
+                );
+            }
+            
+            return null;
+        } catch (error) {
+            console.warn('Failed to get spreadsheet data:', error);
+            return null;
+        }
+    }
 
     assistantButton.addEventListener('click', function () {
-        chatContainer.style.display = 'block';
+        chatContainer.style.display = 'flex';
+        if (chatMessages.children.length === 0) {
+            addMessage('Hello! I\'m your Gemini AI assistant. I can help you analyze data, create charts, suggest formulas, and provide insights about your spreadsheet. What would you like to know?', 'ai');
+        }
     });
 
     closeButton.addEventListener('click', function () {
         chatContainer.style.display = 'none';
     });
 
-    sendButton.addEventListener('click', function () {
-        const message = chatInput.value;
-        if (message.trim() !== '') {
-            // 处理发送消息的逻辑
-
-            chatInput.value = '';
-            resetButton(chatInput)
-
-            // 显示 Loading
-            loadingIndicator.classList.add('show-loading');
-            setTimeout(() => {
-                setFormuala(message);
-                // 隐藏 Loading
-                loadingIndicator.classList.remove('show-loading');
-            }, 1000);
+    clearChatButton.addEventListener('click', async function () {
+        chatMessages.innerHTML = '';
+        
+        // Clear conversation memory
+        try {
+            const services = await initAIServices();
+            if (services && services.geminiAI.clearConversation) {
+                services.geminiAI.clearConversation();
+            }
+        } catch (error) {
+            console.warn('Failed to clear conversation:', error);
         }
+        
+        // Show welcome message
+        addMessage('Conversation cleared. How can I help you with your spreadsheet?', 'ai');
+    });
 
-
+    sendButton.addEventListener('click', async function () {
+        const message = chatInput.value.trim();
+        if (message !== '') {
+            // Add user message to chat
+            addMessage(message, 'user');
+            
+            // Clear input
+            chatInput.value = '';
+            resetButton(chatInput);
+            
+            // Process message
+            await processMessage(message);
+        }
     });
 
     chatInput.addEventListener('input', function () {
@@ -249,7 +430,7 @@ body {
         if (input.scrollHeight > 24) {
             input.style.height = 'auto'
         }
-        input.style.height = input.scrollHeight + 'px'; // 根据内容高度设置 textarea 高度
+        input.style.height = input.scrollHeight + 'px';
         if (input.scrollHeight > 200) {
             input.style.overflowY = 'scroll'
         } else {
@@ -257,7 +438,6 @@ body {
         }
 
         resetButton(input)
-
     }
 
     function resetButton(input) {
@@ -265,13 +445,13 @@ body {
             sendButton.disabled = false;
             sendButton.classList.add('enabled');
         } else {
-            input.style.height = '24px'; // 重置高度为一行
+            input.style.height = '24px';
             sendButton.disabled = true;
             sendButton.classList.remove('enabled');
         }
     }
 
-    // 快捷键
+    // Keyboard shortcuts
     let isComposing = false;
 
     chatInput.addEventListener('compositionstart', function () {
@@ -286,33 +466,24 @@ body {
         const isWindows = navigator.platform.includes('Win');
         const isMac = navigator.platform.includes('Mac');
 
-        const key = event.key;
-
         if (isWindows && event.key === 'Enter' && !isComposing && !event.altKey) {
-            // Windows 上的 Enter 键触发发送
             event.preventDefault();
             sendButton.click();
         } else if (isWindows && event.key === 'Enter' && !isComposing && event.altKey) {
-            // Windows 上的 Alt+Enter 键触发换行
             event.preventDefault();
             this.value += '\n';
         } else if (isMac && event.key === 'Enter' && !isComposing && !event.metaKey) {
-            // Mac 上的 Enter 键触发发送
             event.preventDefault();
             sendButton.click();
         } else if (isMac && event.key === 'Enter' && !isComposing && event.metaKey) {
-            // Mac 上的 Command+Enter 键触发换行
             event.preventDefault();
             this.value += '\n';
-        } else if (!isComposing && (key === "Backspace" || key === "Delete")) {
-
         }
 
         inputHandler(this)
     });
 
-
-    // 添加拖拽功能
+    // Drag functionality
     let isDragging = false;
     let offset = { x: 0, y: 0 };
 
@@ -328,6 +499,7 @@ body {
         if (isDragging) {
             chatContainer.style.left = `${event.clientX - offset.x}px`;
             chatContainer.style.top = `${event.clientY - offset.y}px`;
+            chatContainer.style.transform = 'none';
         }
     });
 
@@ -338,43 +510,70 @@ body {
 
 const needChatHosts = [
     'crm.lashuju.com',
-    'localhost:3000'
+    'localhost:3000',
+    'localhost',
+    '127.0.0.1'
 ]
+
 function isNeedChat() {
     const host = location.host;
-    if (needChatHosts.includes(host)) {
-        return true
-    }
-
-    return false
+    return needChatHosts.some(hostPattern => host.includes(hostPattern)) || host.startsWith('localhost');
 }
 
-
-function setFormuala(sentence = '') {
-
-    let link = getLink(sentence)
-
-    if (link !== '') {
-        setGET_AIRTABLE(link)
-    } else {
-        setASK_AI(sentence)
+// Legacy functions for backward compatibility (but now powered by AI)
+async function setFormuala(sentence = '') {
+    try {
+        const services = await initAIServices();
+        if (!services) return;
+        
+        // Process with AI instead of hardcoded responses
+        const response = await services.geminiAI.processUserQuery(sentence);
+        
+        // Apply AI response to spreadsheet
+        if (response.actions && response.actions.length > 0) {
+            for (const action of response.actions) {
+                if (action.type === 'formula' && action.config.formula) {
+                    const data = [[{ "f": action.config.formula }]];
+                    luckysheet.setRangeValue(data);
+                    break;
+                }
+            }
+        } else if (response.content) {
+            // If no specific formula, set the response as text
+            const data = [[{ "v": response.content }]];
+            luckysheet.setRangeValue(data);
+        }
+    } catch (error) {
+        console.error('setFormuala failed:', error);
+        const data = [[{ "v": "AI processing failed" }]];
+        luckysheet.setRangeValue(data);
     }
+}
 
+async function initAIServices() {
+    if (!window.aiServices) {
+        try {
+            const { geminiAI } = await import('../services/geminiAI.js');
+            window.aiServices = { geminiAI };
+        } catch (error) {
+            console.error('Failed to load AI services:', error);
+            return null;
+        }
+    }
+    return window.aiServices;
 }
 
 function setASK_AI(sentence = '') {
-
     let range = getRange(sentence);
-
-    range = range === '' ? '' : ',' + range
+    range = range === '' ? '' : ',' + range;
     const data = [
         [
             {
                 "f": "=ASK_AI(\"" + sentence + "\"" + range + ")"
             }
         ]
-    ]
-    luckysheet.setRangeValue(data)
+    ];
+    luckysheet.setRangeValue(data);
 }
 
 function setGET_AIRTABLE(link) {
@@ -384,8 +583,8 @@ function setGET_AIRTABLE(link) {
                 "f": "=GET_AIRTABLE_DATA(\"" + link + "\")"
             }
         ]
-    ]
-    luckysheet.setRangeValue(data)
+    ];
+    luckysheet.setRangeValue(data);
 }
 
 function getLink(sentence = '') {
@@ -396,8 +595,7 @@ function getLink(sentence = '') {
         return matches[0];
     }
 
-    return ''
-
+    return '';
 }
 
 function getRange(text) {
