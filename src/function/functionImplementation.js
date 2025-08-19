@@ -18,6 +18,8 @@ import Store from '../store';
 import dayjs from 'dayjs';
 import numeral from 'numeral';
 import {getAirTable,companyTargetData,companyTargetData10,companyTargetData11,companyTargetData12,excelToLuckyArray,excelToArray,askAIData} from '../demoData/getTargetData'
+import { geminiAI } from '../services/geminiAI.js'
+import { aiChartGenerator } from '../services/chartGenerator.js'
 import { setcellvalue } from "../global/setdata";
 
 //公式函数计算
