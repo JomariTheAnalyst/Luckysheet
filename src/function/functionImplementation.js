@@ -4807,7 +4807,7 @@ const functionImplementation = {
         return [formula.error.v, err];
     }
     },
-    "ASK_AI": function() {
+    "ASK_AI": async function() {
          //必要参数个数错误检测
          if (arguments.length < this.m[0] || arguments.length > this.m[1]) {
             return formula.error.na;
